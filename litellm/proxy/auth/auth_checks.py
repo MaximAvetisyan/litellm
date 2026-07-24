@@ -357,8 +357,6 @@ def _global_proxy_budget_check(global_proxy_spend: Optional[float], skip_budget_
         and not skip_budget_checks
         and global_proxy_spend is not None
         and RouteChecks.is_llm_api_route(route=route)
-        and route != "/v1/models"
-        and route != "/models"
     ):
         if math.isfinite(litellm.max_budget) and global_proxy_spend > litellm.max_budget:
             raise litellm.BudgetExceededError(current_cost=global_proxy_spend, max_budget=litellm.max_budget)
@@ -481,6 +479,26 @@ MODEL_DISCOVERY_ROUTES = frozenset(
 )
 
 
+def should_skip_budget_checks(
+    route: str,
+    request_data: dict,
+    request: Optional[Request],
+    llm_router: Optional[Router],
+) -> bool:
+    if route in MODEL_DISCOVERY_ROUTES:
+        return True
+    model = get_model_from_request(
+        request_data=request_data,
+        route=route,
+        request_headers=_safe_get_request_headers(request=request),
+        request_query_params=_safe_get_request_query_params(request=request),
+        llm_router=llm_router,
+    )
+    if model is not None and llm_router is not None:
+        return _is_model_cost_zero(model=model, llm_router=llm_router)
+    return False
+
+
 async def common_checks(
     request_body: dict,
     team_object: Optional[LiteLLM_TeamTable],
@@ -525,8 +543,12 @@ async def common_checks(
         llm_router=llm_router,
     )
 
-    if route in MODEL_DISCOVERY_ROUTES:
-        skip_budget_checks = True
+    skip_budget_checks = skip_budget_checks or should_skip_budget_checks(
+        route=route,
+        request_data=request_body,
+        request=request,
+        llm_router=llm_router,
+    )
 
     # 1. If team is blocked
     if team_object is not None and team_object.blocked is True:

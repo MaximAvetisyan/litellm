@@ -4029,6 +4029,86 @@ MODEL_DISCOVERY_ROUTES = [
 
 
 @pytest.mark.parametrize("route", MODEL_DISCOVERY_ROUTES)
+def test_should_skip_budget_checks_true_for_discovery_routes(route):
+    from litellm.proxy.auth.auth_checks import should_skip_budget_checks
+
+    assert (
+        should_skip_budget_checks(
+            route=route,
+            request_data={},
+            request=None,
+            llm_router=None,
+        )
+        is True
+    )
+
+
+def test_should_skip_budget_checks_false_for_inference_without_model():
+    from litellm.proxy.auth.auth_checks import should_skip_budget_checks
+
+    assert (
+        should_skip_budget_checks(
+            route="/v1/chat/completions",
+            request_data={},
+            request=None,
+            llm_router=None,
+        )
+        is False
+    )
+
+
+def test_should_skip_budget_checks_true_for_zero_cost_model():
+    from litellm.proxy.auth.auth_checks import should_skip_budget_checks
+
+    with patch(
+        "litellm.proxy.auth.auth_checks._is_model_cost_zero",
+        return_value=True,
+    ):
+        assert (
+            should_skip_budget_checks(
+                route="/v1/chat/completions",
+                request_data={"model": "free-model"},
+                request=None,
+                llm_router=MagicMock(),
+            )
+            is True
+        )
+
+
+def test_global_proxy_budget_skips_all_discovery_routes():
+    """Site 2 used to hard-code only /v1/models and /models; all discovery routes must skip."""
+    from litellm.proxy.auth.auth_checks import _global_proxy_budget_check
+
+    original_max = litellm.max_budget
+    try:
+        litellm.max_budget = 1.0
+        for route in MODEL_DISCOVERY_ROUTES:
+            _global_proxy_budget_check(
+                global_proxy_spend=999.0,
+                skip_budget_checks=True,
+                route=route,
+            )
+    finally:
+        litellm.max_budget = original_max
+
+
+def test_global_proxy_budget_enforces_when_not_skipped():
+    from litellm.proxy.auth.auth_checks import _global_proxy_budget_check
+
+    original_max = litellm.max_budget
+    try:
+        litellm.max_budget = 1.0
+        with pytest.raises(litellm.BudgetExceededError):
+            _global_proxy_budget_check(
+                global_proxy_spend=999.0,
+                skip_budget_checks=False,
+                route="/v1/chat/completions",
+            )
+    finally:
+        litellm.max_budget = original_max
+
+
+@pytest.mark.parametrize("route", MODEL_DISCOVERY_ROUTES)
 @pytest.mark.asyncio
 async def test_model_discovery_route_bypasses_team_budget(route):
     """Regression for #27923: an exhausted team budget must not block model-discovery routes,

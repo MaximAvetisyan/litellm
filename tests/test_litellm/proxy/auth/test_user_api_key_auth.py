@@ -39,6 +39,7 @@ from litellm.proxy.auth.user_api_key_auth import (
     _routing_selector_matches_claim,
     _run_centralized_common_checks,
     _run_post_custom_auth_checks,
+    _should_skip_budget_checks,
     _user_api_key_auth_builder,
     get_api_key,
     user_api_key_auth,
@@ -90,6 +91,42 @@ def test_public_ai_hub_routes_remain_public():
     ):
         assert route in LiteLLMRoutes.public_routes.value
         assert _route_requires_auth_despite_public(route, {}) is False
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/v1/models",
+        "/models",
+        "/model/info",
+        "/v1/model/info",
+        "/v2/model/info",
+        "/model_group/info",
+    ],
+)
+def test_should_skip_budget_checks_true_for_model_discovery_routes(route):
+    """Builder + centralized path must skip budget for discovery routes (#27923, #33356)."""
+    assert (
+        _should_skip_budget_checks(
+            request_data={},
+            route=route,
+            request=None,
+            llm_router=None,
+        )
+        is True
+    )
+
+
+def test_should_skip_budget_checks_false_for_chat_without_zero_cost():
+    assert (
+        _should_skip_budget_checks(
+            request_data={"model": "gpt-4o"},
+            route="/v1/chat/completions",
+            request=None,
+            llm_router=None,
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio

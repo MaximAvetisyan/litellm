@@ -206,3 +206,34 @@ async def test_no_max_budget_passes():
 
     assert result is None
     mock_get_spend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_zero_cost_model_skips_personal_budget():
+    """Regression for #29912: zero-cost inference must not hit MaxBudgetLimiter."""
+    handler = _PROXY_MaxBudgetLimiter()
+    user_api_key_dict = _make_user_api_key_auth(user_max_budget=10.0)
+
+    with (
+        patch(
+            "litellm.proxy.auth.auth_checks._is_model_cost_zero",
+            return_value=True,
+        ),
+        patch(
+            "litellm.proxy.proxy_server.llm_router",
+            new=object(),
+        ),
+        patch(
+            "litellm.proxy.proxy_server.get_current_spend",
+            new=AsyncMock(return_value=999.0),
+        ) as mock_get_spend,
+    ):
+        result = await handler.async_pre_call_hook(
+            user_api_key_dict=user_api_key_dict,
+            cache=DualCache(),
+            data={"model": "free-model"},
+            call_type="completion",
+        )
+
+    assert result is None
+    mock_get_spend.assert_not_awaited()

@@ -35,6 +35,14 @@ class _PROXY_MaxBudgetLimiter(CustomLogger):
             if user_api_key_dict.team_id is not None:
                 return
 
+            model = data.get("model") if data else None
+            if model is not None:
+                from litellm.proxy.auth.auth_checks import _is_model_cost_zero
+                from litellm.proxy.proxy_server import llm_router
+
+                if _is_model_cost_zero(model=model, llm_router=llm_router):
+                    return
+
             # The reservation path admits at the strict-`<` boundary and
             # atomically pre-fills the same counter we'd read here. Re-checking
             # with `>=` would reject a request the reservation already admitted
